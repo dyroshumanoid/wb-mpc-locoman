@@ -9,18 +9,23 @@ def visualize_forces(viewer, robot, model, data, q, forces):
     
     # Forces on each foot
     for foot_idx, frame_id in enumerate(robot.foot_frames):
-        force = forces[foot_idx * 3 : (foot_idx + 1) * 3].flatten()
+        force = forces[foot_idx * 6 : (foot_idx + 1) * 6].flatten()
         pos = data.oMf[frame_id].translation
         add_force_to_viewer(viewer, force, pos, foot_idx)
     
     # Arm end-effector force
-    if robot.arm_ee_frame is not None:
+    if robot.arm_ee_frames is not None and len(robot.arm_ee_frames) > 0:
         ext_idx = len(robot.foot_frames)
-        force = forces[ext_idx * 3 :].flatten()
-        pos = data.oMf[robot.arm_ee_frame].translation
-        add_force_to_viewer(viewer, force, pos, ext_idx, scale=0.002)
+        # handle one or multiple arm end-effectors
+        for idx, frame_id in enumerate(robot.arm_ee_frames):
+            force = forces[(ext_idx + idx) * 6 : (ext_idx + idx + 1) * 6].flatten()
+            pos = data.oMf[frame_id].translation
+            add_force_to_viewer(viewer, force, pos, ext_idx + idx, scale=0.002)
 
 def add_force_to_viewer(viewer, force, pos, idx, scale=0.001):
+    
+    force = force[:3]
+
     force_magnitude = np.linalg.norm(force)
     force_direction = force / force_magnitude
     arrow_length = force_magnitude * scale

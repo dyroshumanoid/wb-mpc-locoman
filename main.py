@@ -10,38 +10,39 @@ from utils.visualization import visualize_forces
 from optimization import make_ocp
 
 # Robot params
-robot = B2_Z1(reference_pose="standing_with_arm_up", arm_joints=4)
+robot = TOCABI(reference_pose="standing")
 dynamics ="whole_body_rnea"  # see args.py for options
 
 # Tracking targets
-base_vel_des = np.array([0.1, 0, 0, 0, 0, 0])  # linear + angular velocity
-arm_vel_des = np.array([0.1, 0, -0.2])         # arm EE velocity (relative to the base)
-arm_force_des = np.array([0, 0, 0])            # arm EE force (global)
+base_vel_des = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])  # linear + angular velocity
+arm_vel_des = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0,          # Left arm EE velocity (relative to the base)
+                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0])         # Right arm EE velocity (relative to the base)
+arm_force_des = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0,        # Left arm EE wrench (global) 
+                          0.0, 0.0, 0.0, 0.0, 0.0, 0.0])       # Right arm EE wrench (global)
 
 # OCP params
-nodes = 14      # OCP nodes
-tau_nodes = 3   # add torque limits for this many nodes
-dt_min = 0.015  # initial time step
-dt_max = 0.08   # final time step
+nodes = 10      # OCP nodes
+tau_nodes = 2   # add torque limits for this many nodes
+dt_min = 0.01  # initial time step
+dt_max = 0.20   # final time step
 
 # Gait params
-gait_type = "trot"              # "trot", "walk" or "stand"
-gait_period = 0.8               # seconds
-swing_height = 0.07             # meters
-swing_vel_limits = [0.1, -0.2]  # meters/second
+gait_type = "walk"              # "walk" or "stand"
+gait_period = 1.2               # seconds
+swing_height = 0.08             # meters
+swing_vel_limits = [0.3, -0.3]  # meters/second
 
 # Solver
 solver = "fatrop"  # see args.py for options
 warm_start = True
-compile_solver = False
+compile_solver = True
 load_compiled_solver = None  # None or <filename> in "codegen/lib/"
 
 # MPC
-mpc_loops = 200
+mpc_loops = 500
 
 # Debug
-plot = False  # plot joint positions, velocities, torques
-
+plot = True  # plot joint positions, velocities, torques
 
 def mpc_loop(ocp):
     solve_times = []
@@ -77,6 +78,7 @@ def mpc_loop(ocp):
             sol_time = end_time - start_time
             solve_times.append(sol_time)
             print("Solve time (ms): ", sol_time * 1000)
+            print("Control frequency (Hz): ", 1.0 / sol_time)
 
             # Constraint violation
             stacked_params = ocp.opti.value(ocp.opti.p)
@@ -144,6 +146,17 @@ def main():
     # Run MPC
     ocp = mpc_loop(ocp)
 
+    # Visualize robot
+    robot_instance.initViewer()
+    robot_instance.loadViewerModel("pinocchio")
+    robot_instance.display(q0)
+    viewer = robot_instance.viewer
+    for _ in range(50):
+        for (q, forces) in zip(ocp.q_sol, ocp.forces_sol):
+            robot_instance.display(q)
+            visualize_forces(viewer, robot, model, data, q, forces)
+            time.sleep(dt_min)
+
     if plot:
         # Plot joint positions, velocities, torques
         if hasattr(ocp, "tau_sol"):
@@ -163,26 +176,27 @@ def main():
                 tau_j_sol.append(tau_j)
 
         fig, axs = plt.subplots(3, 1, figsize=(10, 12))
-        labels = ["FL hip", "FL thigh", "FL calf", "FR hip", "FR thigh", "FR calf",
-                  "RL hip", "RL thigh", "RL calf", "RR hip", "RR thigh", "RR calf",
-                  "Arm 1", "Arm 2", "Arm 3", "Arm 4"]
+        labels = ["L_HipYaw", "L_HipRoll", "L_HipPitch", "L_Knee", "L_AnklePitch", "L_AnkleRoll",
+                  "R_HipYaw", "R_HipRoll", "R_HipPitch", "R_Knee", "R_AnklePitch", "R_AnkleRoll",
+                  "Waist1", "Waist2", "Upperbody"
+                  ]
 
         axs[0].set_title("Joint positions (q)")
-        for j in range(robot.nj):
+        for j in range(min(robot.nj, len(labels))):
             # Ignore base (quaternion)
             axs[0].plot([q[7 + j] for q in ocp.q_sol], label=labels[j])
         axs[0].set_xlabel("Time step")
         axs[0].set_ylabel("Position (rad)")
 
         axs[1].set_title("Joint velocities (v)")
-        for j in range(robot.nj):
+        for j in range(min(robot.nj, len(labels))):
             # Ignore base
             axs[1].plot([v[6 + j] for v in ocp.v_sol], label=labels[j])
         axs[1].set_xlabel("Time step")
         axs[1].set_ylabel("Velocity (rad/s)")
 
         axs[2].set_title("Joint torques (tau)")
-        for j in range(robot.nj):
+        for j in range(min(robot.nj, len(labels))):
             axs[2].plot([tau[j] for tau in tau_j_sol], label=labels[j])
         axs[2].set_xlabel("Time step")
         axs[2].set_ylabel("Torque (Nm)")
@@ -192,18 +206,6 @@ def main():
 
         plt.tight_layout(rect=[0, 0, 0.88, 1])  # adjust for legend
         plt.show()
-
-    # Visualize robot
-    robot_instance.initViewer()
-    robot_instance.loadViewerModel("pinocchio")
-    robot_instance.display(q0)
-    viewer = robot_instance.viewer
-    for _ in range(50):
-        for (q, forces) in zip(ocp.q_sol, ocp.forces_sol):
-            robot_instance.display(q)
-            visualize_forces(viewer, robot, model, data, q, forces)
-            time.sleep(dt_min)
-
 
 if __name__ == "__main__":
     main()

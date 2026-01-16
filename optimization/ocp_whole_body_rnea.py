@@ -26,35 +26,7 @@ class OCPWholeBodyRNEA(OCP):
             self.na_opt = 0
 
     def set_weights(self):
-        # State and input weights
-        Q_base_pos_diag = np.concatenate((
-            [0] * 2,      # base x/y
-            [1000],       # base z
-            [10000] * 2,  # base rot x/y
-            [0],          # base rot z
-        ))
-        Q_joint_pos_diag = np.tile([1000, 500, 500], 4)  # hip, thigh, calf
-        Q_joint_pos_diag = np.concatenate((Q_joint_pos_diag, [100] * self.arm_joints))  # arm
-
-        Q_vel_diag = np.concatenate((
-            [2000] * 2,  # base lin x/y
-            [1000],      # base lin z
-            [1000] * 2,  # base ang x/y
-            [2000],      # base ang z
-            [2] * 12,    # joint vel (legs)
-            [10] * self.arm_joints  # joint vel (arm)
-        ))
-
-        Q_diag = np.concatenate((Q_base_pos_diag, Q_joint_pos_diag, Q_vel_diag))
-        R_diag = np.concatenate((
-            [1e-3] * self.na_opt,     # accelerations
-            [5e-4] * self.nf,         # forces
-            [1e-4] * 12,              # leg joint torques
-            [1e-2] * self.arm_joints  # arm joint torques
-        ))
-
-        self.opti.set_value(self.Q_diag, Q_diag)
-        self.opti.set_value(self.R_diag, R_diag)
+        super().set_weights()
 
     def setup_variables(self):
         # State size
@@ -82,17 +54,18 @@ class OCPWholeBodyRNEA(OCP):
         x_des = ca.vertcat(self.robot.q0, self.base_vel_des, [0] * self.nj)  # Nominal q + base target + zero joint vel
         self.dx_des = self.dyn.state_difference()(self.x_init, x_des)
 
-        # Desired forces, using front/rear weight distribution
-        front_ratio = self.robot.front_force_ratio
-        rear_ratio = 1.0 - front_ratio
-        front_scaling = front_ratio * 2  # ensure avg scaling is 1.0
-        rear_scaling = rear_ratio * 2    # ensure avg scaling is 1.0
+        # Desired forces
         f_gravity = 9.81 * self.mass
-        f_front = ca.repmat(ca.vertcat(0, 0, front_scaling * f_gravity / self.n_contacts), 2, 1)
-        f_rear = ca.repmat(ca.vertcat(0, 0, rear_scaling * f_gravity / self.n_contacts), 2, 1)
-        self.f_des = ca.vertcat(f_front, f_rear)
-        if self.arm_ee_frame:
-            self.f_des = ca.vertcat(self.f_des, [0] * 3)  # zero force at end-effector
+
+        f_per_contact = f_gravity / self.n_contacts
+
+        f_des_list = []
+        for _ in range(self.n_feet):
+            f_des_list.append(ca.vertcat(0, 0, f_per_contact, 0, 0, 0))
+
+        self.f_des = ca.vertcat(*f_des_list)
+        if len(self.robot.arm_ee_frames) > 0:
+            self.f_des = ca.vertcat(self.f_des, [0] * 6 * len(self.robot.arm_ee_frames))  # zero force at end-effector
 
         # Desired input: Use this for warm starting
         self.u_des = ca.vertcat([0] * self.na_opt, self.f_des, [0] * self.nj)  # zero acc + torque
@@ -204,9 +177,9 @@ class OCPWholeBodyRNEA(OCP):
                 for j in range(self.n_feet):
                     # Set forces to zero if not in contact
                     if contact_schedule[j, i] == 0:
-                        f_des[3 * j : 3 * j + 3] = [0] * 3
-                if self.arm_ee_frame:
-                    f_des[3*self.n_feet:] = self.opti.value(self.arm_force_des)
+                        f_des[6 * j : 6 * j + 6] = [0] * 6
+                if len(self.robot.arm_ee_frames) > 0:
+                    f_des[6*self.n_feet:] = self.opti.value(self.arm_force_des)
 
                 u_prev = self.U_prev[i]
                 a_prev = u_prev[:self.na_opt]
@@ -253,7 +226,7 @@ class OCPWholeBodyRNEA(OCP):
                 for j in range(self.n_feet):
                     # Set forces to zero if not in contact
                     if contact_schedule[j, i] == 0:
-                        f_des[3 * j : 3 * j + 3] = [0] * 3
+                        f_des[6 * j : 6 * j + 6] = [0] * 6
 
                 if i < self.tau_nodes:
                     U_interp = U_interp_tau_fn(t_new[i])

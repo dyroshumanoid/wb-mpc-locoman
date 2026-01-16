@@ -19,7 +19,7 @@ class Dynamics:
         self.nq = self.model.nq
         self.nv = self.model.nv
         self.nj = self.nq - 7  # without base position and quaternion
-        self.nf = 3 * len(self.ee_frames)  # forces at end-effectors
+        self.nf = 6 * len(self.ee_frames)  # wrenches at end-effectors
 
     def state_integrate(self):
         pass
@@ -49,9 +49,9 @@ class Dynamics:
             translation_joint_to_contact_frame = self.model.frames[frame_id].placement.translation
             rotation_world_to_joint_frame = self.data.oMi[joint_id].rotation.T
 
-            f_world = forces[idx * 3 : (idx + 1) * 3]
-            f_lin = rotation_world_to_joint_frame @ f_world
-            f_ang = ca.cross(translation_joint_to_contact_frame, f_lin)
+            wrench_world = forces[idx * 6 : (idx + 1) * 6]
+            f_lin = rotation_world_to_joint_frame @ wrench_world[:3]
+            f_ang = ca.cross(translation_joint_to_contact_frame, f_lin) + rotation_world_to_joint_frame @ wrench_world[3:6]
             f = ca.vertcat(f_lin, f_ang)
             f_ext[joint_id] = cpin.Force(f)
 
@@ -70,10 +70,9 @@ class Dynamics:
         # Pinocchio terms
         tau_ext = ca.SX.zeros(self.nv)
         for idx, frame_id in enumerate(self.ee_frames):
-            f_world = forces[idx * 3 : (idx + 1) * 3]
+            wrench_world = forces[idx * 6 : (idx + 1) * 6]
             J_c = cpin.computeFrameJacobian(self.model, self.data, q, frame_id, pin.LOCAL_WORLD_ALIGNED)
-            J_c_lin = J_c[:3, :]
-            tau_ext += J_c_lin.T @ f_world
+            tau_ext += J_c.T @ wrench_world
 
         # Gravity compensation
         tau_ext += cpin.computeGeneralizedGravity(self.model, self.data, q)

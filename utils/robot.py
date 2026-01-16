@@ -31,8 +31,8 @@ class Robot:
         self.nq = self.model.nq
         self.nv = self.model.nv
         self.nj = self.nq - 7  # without base position and quaternion
-        self.nf = 12  # forces at feet
-
+        self.nf = 12  # 6D wrenches at both feet
+ 
         # Joint limits from URDF (exclude base indices)
         self.joint_pos_min = self.model.lowerPositionLimit[7:]
         self.joint_pos_max = self.model.upperPositionLimit[7:]
@@ -40,38 +40,73 @@ class Robot:
         self.joint_torque_max = self.model.effortLimit[6:]
 
         # Arm parameters
-        self.arm_ee_frame = None  # end-effector frame in URDF
-        self.arm_joints = 0  # number of joints to consider (the other ones are locked)
+        self.arm_ee_frames = []  # end-effector frame in URDF
+
+        # OCP weights
+        self.Q_diag = None
+        self.R_diag = None
 
     def set_gait_sequence(self, gait_type, gait_period):
         self.gait_sequence = GaitSequence(gait_type, gait_period)
         self.foot_frames = [self.model.getFrameId(f) for f in self.gait_sequence.feet]
 
+import numpy as np
 
-class B2(Robot):
+class TOCABI(Robot):
     def __init__(self, reference_pose="standing"):
-        urdf_path = "robots/b2_description/urdf/b2.urdf"
-        srdf_path = "robots/b2_description/srdf/b2.srdf"
-        super().__init__(urdf_path, srdf_path, reference_pose)
-        
-        # Weight distribution for reference forces (approx hardware measurement)
-        self.front_force_ratio = 0.4
+        urdf_path = "robots/tocabi_description/urdf/tocabi.urdf"
+        srdf_path = "robots/tocabi_description/srdf/tocabi.srdf"
 
-
-class B2_Z1(Robot):
-    def __init__(self, reference_pose="standing_with_arm_up", arm_joints=6):
-        urdf_path = "robots/b2_z1_description/urdf/b2_z1.urdf"
-        srdf_path = "robots/b2_z1_description/srdf/b2_z1.srdf"
-        lock_idx = 14 + arm_joints  # 14 is for the universe (0), base (1), and the 3 legs (2-13)
-        lock_joints = range(lock_idx, 21)  # 20 is the last joint (the gripper)
+        lock_joints = set(["Waist2_Joint", "Upperbody_Joint", "Neck_Joint", "Head_Joint"])
 
         super().__init__(urdf_path, srdf_path, reference_pose, lock_joints=lock_joints)
-        self.arm_joints = arm_joints  # init sets it to 0
+        
+        # Foot dimensions for wrench cone
+        self.foot_length = 0.3  
+        self.foot_width = 0.26   
+        
+        self.arm_ee_frames = [
+            self.model.getFrameId("L_Wrist2_Joint"),
+            self.model.getFrameId("R_Wrist2_Joint"),
+        ]
+        self.nf += 6 * len(self.arm_ee_frames)
+        
+        # State weights
+        Q_base_pos_diag = np.concatenate((
+            [1000] * 2,      # base x/y
+            [0],       # base z
+            [10000] * 2,  # base rot x/y
+            [0],          # base rot z
+        ))
+        
+        Q_leg_pos_diag         = np.array([1000.0] * 6)
+        Q_waist_yaw_pos_diag   = np.array([1000.0])
+        Q_arm_reduced_pos_diag = np.array([1000] * 8)
 
-        if self.arm_joints > 0:
-            # External force at the arm end-effector
-            self.arm_ee_frame = self.model.getFrameId("gripperCenter", type=pin.FIXED_JOINT)
-            self.nf += 3
+        Q_pos_diag = np.concatenate((Q_base_pos_diag, 
+                                     Q_leg_pos_diag, Q_leg_pos_diag,
+                                     Q_waist_yaw_pos_diag,
+                                     Q_arm_reduced_pos_diag, Q_arm_reduced_pos_diag))  
+        
+        Q_base_vel_diag = np.concatenate((
+            [5000] * 2,      # base lin x/y
+            [1000],          # base lin z
+            [1000] * 2,      # base ang x/y
+            [2000],          # base ang z
+        ))
+        
+        Q_leg_vel_diag   = np.array([10.0, 10.0, 10.0, 10.0, 10.0, 10.0])
+        Q_waist_yaw_vel_diag   = np.array([10.0])
+        Q_arm_reduced_vel_diag = np.array([10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0])
 
-        # Weight distribution for reference forces (approx hardware measurement)
-        self.front_force_ratio = 0.4
+        Q_vel_diag = np.concatenate((Q_base_vel_diag, 
+                                     Q_leg_vel_diag, Q_leg_vel_diag,
+                                     Q_waist_yaw_vel_diag,
+                                     Q_arm_reduced_vel_diag, Q_arm_reduced_vel_diag))  
+
+        self.Q_diag = np.concatenate((Q_pos_diag, Q_vel_diag))
+        self.R_diag = np.concatenate((
+            [1e-3] * self.nv,     # accelerations
+            [5e-4] * self.nf,         # forces
+            [1e-4] * self.nj,         # leg joint torques
+        ))

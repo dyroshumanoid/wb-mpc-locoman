@@ -52,9 +52,9 @@ class DynamicsWholeBodyTorque(Dynamics):
             translation_joint_to_contact_frame = self.model.frames[frame_id].placement.translation
             rotation_world_to_joint_frame = self.data.oMi[joint_id].rotation.T
 
-            f_world = forces[idx * 3 : (idx + 1) * 3]
-            f_lin = rotation_world_to_joint_frame @ f_world
-            f_ang = ca.cross(translation_joint_to_contact_frame, f_lin)
+            wrench_world = forces[idx * 6 : (idx + 1) * 6]
+            f_lin = rotation_world_to_joint_frame @ wrench_world[:3]
+            f_ang = ca.cross(translation_joint_to_contact_frame, f_lin) + rotation_world_to_joint_frame @ wrench_world[3:6]
             f = ca.vertcat(f_lin, f_ang)
             f_ext[joint_id] = cpin.Force(f)
 
@@ -62,30 +62,3 @@ class DynamicsWholeBodyTorque(Dynamics):
         tau_rnea = cpin.rnea(self.model, self.data, q, v, a, f_ext)
 
         return ca.Function("rnea_dyn", [q, v, a, forces], [tau_rnea], ["q", "v", "a", "forces"], ["tau_rnea"])
-
-    def aba_dynamics(self):
-        q = ca.SX.sym("q", self.nq)  # positions
-        v = ca.SX.sym("v", self.nv)  # velocites
-        tau_j = ca.SX.sym("tau_j", self.nj)  # joint torques
-        tau = ca.vertcat(ca.SX.zeros(6), tau_j)  # zero base torques
-        forces = ca.SX.sym("forces", self.nf)  # end-effector forces
-
-        # ABA
-        cpin.framesForwardKinematics(self.model, self.data, q)
-        f_ext = [cpin.Force(ca.SX.zeros(6)) for _ in range(self.model.njoints)]
-        for idx, frame_id in enumerate(self.ee_frames):
-            # OCS2 implementation
-            joint_id = self.model.frames[frame_id].parentJoint
-            translation_joint_to_contact_frame = self.model.frames[frame_id].placement.translation
-            rotation_world_to_joint_frame = self.data.oMi[joint_id].rotation.T
-
-            f_world = forces[idx * 3 : (idx + 1) * 3]
-            f_lin = rotation_world_to_joint_frame @ f_world
-            f_ang = ca.cross(translation_joint_to_contact_frame, f_lin)
-            f = ca.vertcat(f_lin, f_ang)
-            f_ext[joint_id] = cpin.Force(f)
-
-        # Return whole-body accelerations (base + joints)
-        a = cpin.aba(self.model, self.data, q, v, tau, f_ext)
-
-        return ca.Function("aba_dyn", [q, v, tau_j, forces], [a], ["q", "v", "tau_j", "forces"], ["a"])

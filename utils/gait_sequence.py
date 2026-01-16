@@ -3,23 +3,17 @@ import casadi as ca
 
 
 class GaitSequence:
-    def __init__(self, gait_type="trot", gait_period=0.5):
-        self.feet = ["FR_foot", "FL_foot", "RR_foot", "RL_foot"]
+    def __init__(self, gait_type="trot", gait_period=1.6):
+        self.feet = ["L_Foot_Link", "R_Foot_Link"]
         self.gait_type = gait_type
         self.gait_period = gait_period
 
-        if self.gait_type == "trot":
-            self.n_contacts = 2
+        if self.gait_type == "walk":
+            self.n_contacts = 1
             self.swing_period = 0.5 * self.gait_period
-
-        elif self.gait_type == "walk":
-            self.n_contacts = 3
-            self.swing_period = 0.25 * self.gait_period
-
         elif self.gait_type == "stand":
-            self.n_contacts = 4
-            self.swing_period = self.gait_period  # zero becomes degenerate
-
+            self.n_contacts = 2
+            self.swing_period = self.gait_period  
         else:
             raise ValueError(f"Gait: {self.gait_type} not supported")
 
@@ -27,52 +21,24 @@ class GaitSequence:
         """
         Returns contact and swing schedules for the horizon, given the time steps in dts
         """
-        contact_schedule = np.ones((4, nodes))  # in_contact: 0 or 1
-        swing_schedule = np.zeros((4, nodes))  # swing_phase: from 0 to 1
-
-        if self.gait_type == "trot":
+        contact_schedule = np.ones((2, nodes))  # in_contact: 0 or 1
+        swing_schedule  = np.zeros((2, nodes))  # swing_phase: from 0 to 1
+        
+        if self.gait_type == "walk":
             t = t_current
             for i in range(nodes):
                 if i > 0:
                     t += dts[i - 1]
-                gait_phase = t % self.gait_period / self.gait_period
+                gait_phase  = t % self.gait_period / self.gait_period
                 swing_phase = t % self.swing_period / self.swing_period
                 if gait_phase < 0.5:
-                    # FR, RL in swing
-                    contact_schedule[0, i] = 0
-                    contact_schedule[3, i] = 0
-                    swing_schedule[0, i] = swing_phase
-                    swing_schedule[3, i] = swing_phase
-                else:
-                    # FL, RR in swing
-                    contact_schedule[1, i] = 0
-                    contact_schedule[2, i] = 0
-                    swing_schedule[1, i] = swing_phase
-                    swing_schedule[2, i] = swing_phase
-
-        elif self.gait_type == "walk":
-            t = t_current
-            for i in range(nodes):
-                if i > 0:
-                    t += dts[i - 1]
-                gait_phase = t % self.gait_period / self.gait_period
-                swing_phase = t % self.swing_period / self.swing_period
-                if gait_phase < 0.25:
-                    # FL in swing
+                    # Left swing
                     contact_schedule[1, i] = 0
                     swing_schedule[1, i] = swing_phase
-                elif gait_phase < 0.5:
-                    # RR in swing
-                    contact_schedule[2, i] = 0
-                    swing_schedule[2, i] = swing_phase
-                elif gait_phase < 0.75:
-                    # FR in swing
+                else:
+                    # Right swing
                     contact_schedule[0, i] = 0
                     swing_schedule[0, i] = swing_phase
-                else:
-                    # RL in swing
-                    contact_schedule[3, i] = 0
-                    swing_schedule[3, i] = swing_phase
 
         return contact_schedule, swing_schedule
 

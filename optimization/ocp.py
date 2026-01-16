@@ -5,8 +5,6 @@ import osqp
 from scipy import sparse
 
 from utils.gait_sequence import *
-from dynamics import DynamicsCentroidalVel
-
 
 class OCP:
     def __init__(self, robot, nodes, tau_nodes, warm_start):
@@ -15,11 +13,10 @@ class OCP:
         self.data = robot.data
         self.gait_sequence = robot.gait_sequence
         self.foot_frames = robot.foot_frames
-        self.arm_ee_frame = robot.arm_ee_frame
+        self.arm_ee_frames = robot.arm_ee_frames
         self.ee_frames = self.foot_frames.copy()
-        if self.arm_ee_frame:
-            self.ee_frames.append(self.arm_ee_frame)        
-        self.arm_joints = robot.arm_joints
+        if len(self.robot.arm_ee_frames) > 0:
+            self.ee_frames.extend(self.robot.arm_ee_frames)
         self.n_feet = len(self.foot_frames)
 
         self.nq = robot.nq
@@ -71,8 +68,8 @@ class OCP:
         self.R_diag = self.opti.parameter(self.nu_opt[0])  # input weights
 
         self.base_vel_des = self.opti.parameter(6)  # linear + angular velocity
-        self.arm_vel_des = self.opti.parameter(3)  # linear velocity at end-effector
-        self.arm_force_des = self.opti.parameter(3)  # force at end-effector
+        self.arm_vel_des = self.opti.parameter(6 * len(self.robot.arm_ee_frames))   # linear velocity at both end-effectors
+        self.arm_force_des = self.opti.parameter(6 * len(self.robot.arm_ee_frames)) # force at both end-effectors
 
         # Adaptive time steps
         ratio = self.dt_max / self.dt_min
@@ -116,22 +113,45 @@ class OCP:
         # Initial state
         self.opti.subject_to(self.DX_opt[0] == [0] * self.ndx_opt)
 
-        if self.arm_ee_frame:
+        arm_vel_des_global_list = []
+        
+        if self.arm_ee_frames:
             # Compute global velocity target for arm end-effector
             q_0 = self.x_init[:self.nq]
-            arm_pos_0 = self.dyn.get_frame_position(self.arm_ee_frame)(q_0)
             base_pos_0 = self.dyn.get_base_position()(q_0)
             base_rot_0 = self.dyn.get_base_rotation()(q_0)
-
-            arm_vel_des_global = base_rot_0 @ self.arm_vel_des
-            arm_vel_des_global[2] = self.arm_vel_des[2]  # keep z-velocity
-            arm_vel_des_global += self.base_vel_des[:3]  # add base velocity
-
-            # Include angular velocity contribution
+            
+            base_lin_vel = self.base_vel_des[:3]
             base_ang_vel = self.base_vel_des[3:]
-            arm_pos_rel = arm_pos_0 - base_pos_0
-            ang_vel_correction = ca.cross(base_ang_vel, arm_pos_rel)
-            arm_vel_des_global += ang_vel_correction
+
+            for idx, frame_id in enumerate(self.arm_ee_frames):
+
+                # desired EE twist in base frame
+                arm_v_des = self.arm_vel_des[6*idx     : 6*idx + 3]
+                arm_w_des = self.arm_vel_des[6*idx + 3 : 6*idx + 6]
+
+                # rotate to world frame
+                arm_v_des_global = base_rot_0 @ arm_v_des
+                arm_v_des_global[2] = arm_v_des[2]
+                arm_v_des_global += base_lin_vel
+
+                arm_w_des_global = base_rot_0 @ arm_w_des
+                arm_w_des_global += base_ang_vel
+
+                # EE position in world
+                arm_pos_0 = self.dyn.get_frame_position(frame_id)(q_0)
+                arm_pos_rel = arm_pos_0 - base_pos_0
+
+                ang_vel_correction = ca.cross(base_ang_vel, arm_pos_rel)
+                arm_v_des_global += ang_vel_correction
+
+                arm_vel_des_global = ca.vertcat(arm_v_des_global, arm_w_des_global)
+
+                arm_vel_des_global_list.append(arm_vel_des_global)
+         
+        # Foot dimensions for wrench cone
+        W = self.robot.foot_width / 2
+        L = self.robot.foot_length / 2
 
         for i in range(self.nodes):
             # Gather state and input info
@@ -144,30 +164,44 @@ class OCP:
 
             # Contact and swing constraints
             for idx, frame_id in enumerate(self.foot_frames):
-                f_e = forces[idx * 3 : (idx + 1) * 3]
+                f_e = forces[idx * 6 : (idx + 1) * 6]
 
                 # Get contact and swing info
                 in_contact = self.contact_schedule[idx, i]
                 swing_phase = self.swing_schedule[idx, i]
 
-                # Contact: Friction cone
-                f_normal = f_e[2]
-                f_tangent_square = f_e[0]**2 + f_e[1]**2
-                self.opti.subject_to(in_contact * f_normal >= 0)
-                self.opti.subject_to(in_contact * mu**2 * f_normal**2 >= in_contact * f_tangent_square)
+                # Contact: Wrench cone
+                fz = f_e[2]
+                fx = f_e[0]
+                fy = f_e[1]
+                tx = f_e[3]
+                ty = f_e[4]
+                tz = f_e[5]
+                self.opti.subject_to(in_contact * fz >= 0)
+                self.opti.subject_to(in_contact * ca.fabs(fx) <= in_contact * mu * fz)
+                self.opti.subject_to(in_contact * ca.fabs(fy) <= in_contact * mu * fz)
+                self.opti.subject_to(in_contact * ca.fabs(tx) <= in_contact * W * fz)
+                self.opti.subject_to(in_contact * ca.fabs(ty) <= in_contact * L * fz)
+                tau_min = -mu * (W + L) * fz + ca.fabs(W * fx - mu * tx) + ca.fabs(L * fy - mu * ty)
+                tau_max = mu * (W + L) * fz - ca.fabs(W * fx + mu * tx) - ca.fabs(L * fy + mu * ty)
+                self.opti.subject_to(in_contact * tau_min <= in_contact * tz)
+                self.opti.subject_to(in_contact * tz <= in_contact * tau_max)
 
-                # Swing: Zero force
-                self.opti.subject_to((1 - in_contact) * f_e == [0] * 3)
+                # Swing: Zero wrenches
+                self.opti.subject_to((1 - in_contact) * f_e == [0] * 6)
 
-                if i == 0 and type(self.dyn) != DynamicsCentroidalVel:
-                    # First step: No velocity constraints, since they would over-constrain the initial state
-                    # Except for centroidal-vel dynamics, where the velocities are part of the inputs
-                    continue
-
-                # Contact: Zero xy-velocity
+                # Contact: Zero xy-velocities
                 vel = self.dyn.get_frame_velocity(frame_id)(q, v)
                 vel_xy = vel[:2]
                 self.opti.subject_to(in_contact * vel_xy == [0] * 2)
+                
+                # Contact: Zero angular velocities
+                vel_ang = vel[3:]
+                self.opti.subject_to(in_contact * vel_ang == [0] * 3)
+                
+                # Swing: Zero roll-pitch velocity
+                vel_rollpitch = vel[3:5]
+                self.opti.subject_to((1 - in_contact) * vel_rollpitch == [0] * 2)
 
                 # Contact: Zero z-velocity / Swing: Spline z-velocity
                 vel_z = vel[2]
@@ -185,25 +219,24 @@ class OCP:
             self.opti.set_value(self.n_contacts, self.gait_sequence.n_contacts)
             self.opti.set_initial(self.DX_opt[i], np.zeros(self.ndx_opt))
             u_warm = self.opti.value(self.u_des)[:self.nu_opt[i]]
+            
             self.opti.set_initial(self.U_opt[i], u_warm)
 
             # Arm end-effector force
-            if self.arm_ee_frame:
-                f_e = forces[3*self.n_feet:]
-                self.opti.subject_to(f_e == self.arm_force_des)
-
-            if i == 0 and type(self.dyn) != DynamicsCentroidalVel:
-                # First step: No velocity constraints, since they would over-constrain the initial state
-                # Except for centroidal-vel dynamics, where the velocities are part of the inputs
-                continue
+            if self.arm_ee_frames:
+                for idx in range(len(self.arm_ee_frames)):
+                    f = forces[6 * self.n_feet + 6*idx : 6 * self.n_feet + 6*(idx+1)]
+                    f_des = self.arm_force_des[6*idx : 6*(idx+1)]
+                    self.opti.subject_to(f[:3] == f_des[:3])
 
             # Arm end-effector velocity
-            if self.arm_ee_frame:
-                vel = self.dyn.get_frame_velocity(self.arm_ee_frame)(q, v)
-                vel_lin = vel[:3]
-                vel_diff = vel_lin - arm_vel_des_global  # global!
-                self.opti.subject_to(vel_diff == [0] * 3)
-
+            if self.arm_ee_frames:
+                for idx, frame_id in enumerate(self.arm_ee_frames):
+                    vel = self.dyn.get_frame_velocity(frame_id)(q, v)
+                    vel_lin = vel[:6]
+                    vel_diff = vel_lin - arm_vel_des_global_list[idx]
+                    self.opti.subject_to(vel_diff[:3] == [0] * 3)
+                    
             # Joint limits
             pos_min = self.robot.joint_pos_min
             pos_max = self.robot.joint_pos_max
@@ -236,9 +269,12 @@ class OCP:
 
     def set_weights(self):
         """
-        Set the weight matrix diagonals Q_diag and R_diag.
+        Set the weight matrix diagonals Q_diag and R_diag from robot.
         """
-        pass
+        if self.robot.Q_diag is not None:
+            self.opti.set_value(self.Q_diag, self.robot.Q_diag)
+        if self.robot.R_diag is not None:
+            self.opti.set_value(self.R_diag, self.robot.R_diag)
 
     def set_time_params(self, dt_min, dt_max):
         self.opti.set_value(self.dt_min, dt_min)
@@ -250,10 +286,10 @@ class OCP:
 
     def set_tracking_targets(self, base_vel_des, arm_vel_des=None, arm_force_des=None):
         self.opti.set_value(self.base_vel_des, base_vel_des)
-        if self.arm_ee_frame:
+        if self.arm_ee_frames:
             self.opti.set_value(self.arm_vel_des, arm_vel_des)
             self.opti.set_value(self.arm_force_des, arm_force_des)
-
+            
     def update_initial_state(self, x_init):
         self.opti.set_value(self.x_init, x_init)
 
@@ -310,7 +346,7 @@ class OCP:
             self.solver_params = [self.x_init, self.dt_min, self.dt_max, self.contact_schedule, self.swing_schedule,
                                   self.n_contacts, self.swing_period, self.swing_height, self.swing_vel_limits,
                                   self.Q_diag, self.R_diag, self.base_vel_des]
-            if self.arm_ee_frame:
+            if self.arm_ee_frames:
                 self.solver_params += [self.arm_vel_des]
                 self.solver_params += [self.arm_force_des]
             if self.warm_start:
