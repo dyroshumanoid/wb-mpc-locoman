@@ -16,12 +16,33 @@ class Robot:
             joint_model.addJoint(pin.JointModelTranslation())
             joint_model.addJoint(pin.JointModelSphericalZYX())
 
+        # self.robot = RobotWrapper.BuildFromURDF(urdf_path, [urdf_dir], joint_model)
+        # if lock_joints:
+        #     self.robot = self.robot.buildReducedRobot(lock_joints)
+
+        # self.model = self.robot.model
+        # self.data = self.robot.data
+        # if srdf_path and reference_pose:
+        #     pin.loadReferenceConfigurations(self.model, srdf_path)
+        #     self.q0 = self.model.referenceConfigurations[reference_pose]
+        # else:
+        #     self.q0 = self.robot.q0
+
         self.robot = RobotWrapper.BuildFromURDF(urdf_path, [urdf_dir], joint_model)
+
+        if srdf_path and reference_pose:
+            pin.loadReferenceConfigurations(self.robot.model, srdf_path)
+            q_ref = self.robot.model.referenceConfigurations[reference_pose]
+        else:
+            q_ref = pin.neutral(self.robot.model)
+
         if lock_joints:
-            self.robot = self.robot.buildReducedRobot(lock_joints)
+            joint_ids = [self.robot.model.getJointId(name) for name in lock_joints if self.robot.model.existJointName(name)]
+            self.robot = self.robot.buildReducedRobot(joint_ids, q_ref)
 
         self.model = self.robot.model
         self.data = self.robot.data
+
         if srdf_path and reference_pose:
             pin.loadReferenceConfigurations(self.model, srdf_path)
             self.q0 = self.model.referenceConfigurations[reference_pose]
@@ -32,6 +53,8 @@ class Robot:
         self.nv = self.model.nv
         self.nj = self.nq - 7  # without base position and quaternion
         self.nf = 12  # 6D wrenches at both feet
+
+        print(f"Robot initialized: nq={self.nq}, nv={self.nv}, nj={self.nj}, nf={self.nf}")
  
         # Joint limits from URDF (exclude base indices)
         self.joint_pos_min = self.model.lowerPositionLimit[7:]
@@ -57,7 +80,13 @@ class TOCABI(Robot):
         urdf_path = "robots/tocabi_description/urdf/tocabi.urdf"
         srdf_path = "robots/tocabi_description/srdf/tocabi.srdf"
 
-        lock_joints = set(["Waist2_Joint", "Upperbody_Joint", "Neck_Joint", "Head_Joint"])
+        lock_joints = set(["Waist1_Joint", "Waist2_Joint", "Upperbody_Joint", "Neck_Joint", "Head_Joint",
+                           "L_Shoulder1_Joint", "L_Shoulder2_Joint", "L_Shoulder3_Joint", 
+                            "L_Armlink_Joint", "L_Elbow_Joint", "L_Forearm_Joint", 
+                            "L_Wrist1_Joint", "L_Wrist2_Joint",
+                            "R_Shoulder1_Joint", "R_Shoulder2_Joint", "R_Shoulder3_Joint", 
+                            "R_Armlink_Joint", "R_Elbow_Joint", "R_Forearm_Joint", 
+                            "R_Wrist1_Joint", "R_Wrist2_Joint"])
 
         super().__init__(urdf_path, srdf_path, reference_pose, lock_joints=lock_joints)
         
@@ -66,10 +95,10 @@ class TOCABI(Robot):
         self.foot_width = 0.26   
         
         self.arm_ee_frames = [
-            self.model.getFrameId("L_Wrist2_Joint"),
-            self.model.getFrameId("R_Wrist2_Joint"),
+            # self.model.getFrameId("L_Wrist2_Joint"),
+            # self.model.getFrameId("R_Wrist2_Joint"),
         ]
-        self.nf += 6 * len(self.arm_ee_frames)
+        # self.nf += 6 * len(self.arm_ee_frames)
 
         self.hip_frames = [
             self.model.getFrameId("L_HipPitch_Joint"),
@@ -88,10 +117,13 @@ class TOCABI(Robot):
         Q_waist_yaw_pos_diag   = np.array([1000.0])
         Q_arm_reduced_pos_diag = np.array([1000] * 8)
 
+        # Q_pos_diag = np.concatenate((Q_base_pos_diag, 
+        #                              Q_leg_pos_diag, Q_leg_pos_diag,
+        #                              Q_waist_yaw_pos_diag,
+        #                              Q_arm_reduced_pos_diag, Q_arm_reduced_pos_diag))  
+
         Q_pos_diag = np.concatenate((Q_base_pos_diag, 
-                                     Q_leg_pos_diag, Q_leg_pos_diag,
-                                     Q_waist_yaw_pos_diag,
-                                     Q_arm_reduced_pos_diag, Q_arm_reduced_pos_diag))  
+                                     Q_leg_pos_diag, Q_leg_pos_diag,))  
         
         Q_base_vel_diag = np.concatenate((
             [2000] * 2,      # base lin x/y
@@ -104,10 +136,14 @@ class TOCABI(Robot):
         Q_waist_yaw_vel_diag   = np.array([10.0])
         Q_arm_reduced_vel_diag = np.array([10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0])
 
+        # Q_vel_diag = np.concatenate((Q_base_vel_diag, 
+        #                              Q_leg_vel_diag, Q_leg_vel_diag,
+        #                              Q_waist_yaw_vel_diag,
+        #                              Q_arm_reduced_vel_diag, Q_arm_reduced_vel_diag))  
+        
         Q_vel_diag = np.concatenate((Q_base_vel_diag, 
-                                     Q_leg_vel_diag, Q_leg_vel_diag,
-                                     Q_waist_yaw_vel_diag,
-                                     Q_arm_reduced_vel_diag, Q_arm_reduced_vel_diag))  
+                                     Q_leg_vel_diag, Q_leg_vel_diag,))
+
 
         self.Q_diag = np.concatenate((Q_pos_diag, Q_vel_diag))
         self.R_diag = np.concatenate((
@@ -121,13 +157,21 @@ class P73(Robot):
         urdf_path = "robots/P73_description/urdf/p73.urdf"
         srdf_path = "robots/P73_description/srdf/p73.srdf"
 
-        lock_joints = set(["WaistPitch_Joint", "WaistRoll_Joint", "NeckRoll_Joint", "NeckYaw_Joint", "NeckPitch_Joint"])
-
+        lock_joints = set([
+            "WaistPitch_Joint", "WaistRoll_Joint", "WaistYaw_Joint",
+            "NeckRoll_Joint", "NeckYaw_Joint", "NeckPitch_Joint",
+            "L_ShoulderPitch_Joint", "L_ShoulderRoll_Joint", "L_ShoulderYaw_Joint", 
+            "L_Elbow_Joint", "L_WristYaw_Joint", "L_WristPitch_Joint", "L_WristRoll_Joint",
+            "R_ShoulderPitch_Joint", "R_ShoulderRoll_Joint", "R_ShoulderYaw_Joint", 
+            "R_Elbow_Joint", "R_WristYaw_Joint", "R_WristPitch_Joint", "R_WristRoll_Joint"
+        ])
         super().__init__(urdf_path, srdf_path, reference_pose, lock_joints=lock_joints)
         
         # Foot dimensions for wrench cone
-        self.foot_length = 0.225
-        self.foot_width = 0.075
+        # self.foot_length = 0.225
+        # self.foot_width = 0.075
+        self.foot_length = 0.3
+        self.foot_width = 0.3
         
         self.hip_frames = [
             self.model.getFrameId("L_HipPitch_Joint"),
@@ -135,10 +179,10 @@ class P73(Robot):
         ]
 
         self.arm_ee_frames = [
-            self.model.getFrameId("L_WristRoll_Joint"),
-            self.model.getFrameId("R_WristRoll_Joint"),
+            # self.model.getFrameId("L_WristRoll_Joint"),
+            # self.model.getFrameId("R_WristRoll_Joint"),
         ]
-        self.nf += 6 * len(self.arm_ee_frames)
+        # self.nf += 6 * len(self.arm_ee_frames)
         
         # State weights
         Q_base_pos_diag = np.concatenate((
@@ -147,15 +191,19 @@ class P73(Robot):
             [10000] * 2,  # base rot x/y
             [0],          # base rot z
         ))
-        Q_leg_pos_diag   = np.array([1000.0, 1000.0, 1000.0, 10000.0, 1000.0, 1000.0])
+        Q_leg_pos_diag   = np.array([1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1000.0])
         Q_waist_yaw_pos_diag   = np.array([1000.0])
-        Q_arm_reduced_pos_diag = np.array([1000] * 7)
+        # Q_arm_reduced_pos_diag = np.array([1000] * 7)
+
+        # Q_pos_diag = np.concatenate((Q_base_pos_diag, 
+        #                              Q_leg_pos_diag, Q_leg_pos_diag,
+        #                              Q_waist_yaw_pos_diag,
+        #                              Q_arm_reduced_pos_diag, Q_arm_reduced_pos_diag))  
+        
 
         Q_pos_diag = np.concatenate((Q_base_pos_diag, 
-                                     Q_leg_pos_diag, Q_leg_pos_diag,
-                                     Q_waist_yaw_pos_diag,
-                                     Q_arm_reduced_pos_diag, Q_arm_reduced_pos_diag))  
-        
+                                     Q_leg_pos_diag, Q_leg_pos_diag))  
+
         Q_base_vel_diag = np.concatenate((
             [2000] * 2,      # base lin x/y
             [1000],          # base lin z
@@ -165,16 +213,19 @@ class P73(Robot):
         
         Q_leg_vel_diag   = np.array([10.0, 10.0, 10.0, 10.0, 10.0, 10.0]) 
         Q_waist_yaw_vel_diag   = np.array([10.0])
-        Q_arm_reduced_vel_diag = np.array([10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0])
+        # Q_arm_reduced_vel_diag = np.array([10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0])
+
+        # Q_vel_diag = np.concatenate((Q_base_vel_diag, 
+        #                              Q_leg_vel_diag, Q_leg_vel_diag,
+        #                              Q_waist_yaw_vel_diag,
+        #                              Q_arm_reduced_vel_diag, Q_arm_reduced_vel_diag))  
 
         Q_vel_diag = np.concatenate((Q_base_vel_diag, 
-                                     Q_leg_vel_diag, Q_leg_vel_diag,
-                                     Q_waist_yaw_vel_diag,
-                                     Q_arm_reduced_vel_diag, Q_arm_reduced_vel_diag))  
-
+                                     Q_leg_vel_diag, Q_leg_vel_diag)) 
         self.Q_diag = np.concatenate((Q_pos_diag, Q_vel_diag))
         self.R_diag = np.concatenate((
             [1e-3] * self.nv,     # accelerations
             [5e-4] * self.nf,         # forces
             [1e-4] * self.nj,         # leg joint torques
         ))
+

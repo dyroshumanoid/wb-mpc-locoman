@@ -11,8 +11,8 @@ from utils.visualization import visualize_forces
 from optimization import make_ocp, ocp
 
 # Robot params
-# robot = TOCABI(reference_pose="standing")
-robot = P73(reference_pose="standing")
+robot = TOCABI(reference_pose="standing")
+# robot = P73(reference_pose="standing")
 dynamics ="whole_body_rnea"  # see args.py for options
 
 # Tracking targets
@@ -44,7 +44,8 @@ load_compiled_solver = None  # None or <filename> in "codegen/lib/"
 mpc_loops = 500
 
 # Debug
-plot = True  # plot joint positions, velocities, torques
+display = True  # plot joint positions, velocities, torques
+plot = False  # plot joint positions, velocities, torques
 
 def mpc_loop(ocp):
     solve_times = []
@@ -176,31 +177,32 @@ def main():
     #         visualize_forces(viewer, robot, model, data, q, forces)
     #         time.sleep(dt_min)
 
-    robot_instance.initViewer()
-    robot_instance.loadViewerModel("pinocchio")
-    
-    viewer = robot_instance.viewer
-    visual_model = robot_instance.visual_model
-    visual_data = robot_instance.visual_data 
+    if display:
+        robot_instance.initViewer()
+        robot_instance.loadViewerModel("pinocchio")
+        
+        viewer = robot_instance.viewer
+        visual_model = robot_instance.visual_model
+        visual_data = robot_instance.visual_data 
 
-    for _ in range(50):
-        for (q, forces) in zip(ocp.q_sol, ocp.forces_sol):
-            pin.updateGeometryPlacements(model, data, visual_model, visual_data, q)
-            
-            for geom in visual_model.geometryObjects:
-                visual_name = f"pinocchio/visuals/{geom.name}"
-                geom_id = visual_model.getGeometryId(geom.name)
+        for _ in range(50):
+            for (q, forces) in zip(ocp.q_sol, ocp.forces_sol):
+                pin.updateGeometryPlacements(model, data, visual_model, visual_data, q)
                 
-                T = visual_data.oMg[geom_id]
-                
-                scale = np.array(geom.meshScale).flatten()
-                Tscale = np.eye(4)
-                Tscale[:3, :3] = np.diag(scale)
-                
-                viewer[visual_name].set_transform(T @ Tscale)
+                for geom in visual_model.geometryObjects:
+                    visual_name = f"pinocchio/visuals/{geom.name}"
+                    geom_id = visual_model.getGeometryId(geom.name)
+                    
+                    T = visual_data.oMg[geom_id]
+                    
+                    scale = np.array(geom.meshScale).flatten()
+                    Tscale = np.eye(4)
+                    Tscale[:3, :3] = np.diag(scale)
+                    
+                    viewer[visual_name].set_transform(T @ Tscale)
 
-            visualize_forces(viewer, robot, model, data, q, forces)
-            time.sleep(dt_min)
+                visualize_forces(viewer, robot, model, data, q, forces)
+                time.sleep(dt_min)
 
     if plot:
         # Plot joint positions, velocities, torques
