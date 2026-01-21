@@ -112,9 +112,8 @@ class OCP:
         """
         # Initial state
         self.opti.subject_to(self.DX_opt[0] == [0] * self.ndx_opt)
-
         arm_vel_des_global_list = []
-        
+
         if self.arm_ee_frames:
             # Compute global velocity target for arm end-effector
             q_0 = self.x_init[:self.nq]
@@ -152,6 +151,7 @@ class OCP:
         # Foot dimensions for wrench cone
         W = self.robot.foot_width / 2
         L = self.robot.foot_length / 2
+        g = 9.81
 
         for i in range(self.nodes):
             # Gather state and input info
@@ -162,6 +162,13 @@ class OCP:
             # Dynamics constraints
             self.setup_dynamics_constraints(i)
 
+            v_base_xy = v[:2]
+            v_base_des_xy = self.base_vel_des[:2]
+            T_swing = self.swing_period
+            base_rot = self.dyn.get_base_rotation()(q)
+            base_pos = self.dyn.get_base_position()(q)
+
+            z0 = base_pos[2]
             # Contact and swing constraints
             for idx, frame_id in enumerate(self.foot_frames):
                 f_e = forces[idx * 6 : (idx + 1) * 6]
@@ -194,14 +201,27 @@ class OCP:
                 vel = self.dyn.get_frame_velocity(frame_id)(q, v)
                 vel_xy = vel[:2]
                 self.opti.subject_to(in_contact * vel_xy == [0] * 2)
+
+                p_nominal_hip = self.dyn.get_frame_position(self.robot.hip_frames[idx])(q)[:2]
+                p_step_target = p_nominal_hip + (T_swing / 2.0) * v_base_des_xy + \
+                                ca.sqrt(z0/g) * (v_base_xy - v_base_des_xy)
+                # p_step_target[0] = ca.fmax(p_step_target[0], base_pos[0] + 0.05)
+                pos_foot = self.dyn.get_frame_position(frame_id)(q)[:2]
+                k_p=3.0
+                v_swing_xy_des = v_base_xy + k_p * (p_step_target - pos_foot)
+                self.opti.subject_to((1 - in_contact) * (vel_xy - v_swing_xy_des) == [0] * 2)
                 
+
+
                 # Contact: Zero angular velocities
                 vel_ang = vel[3:]
                 self.opti.subject_to(in_contact * vel_ang == [0] * 3)
-                
+               
                 # Swing: Zero roll-pitch velocity
                 vel_rollpitch = vel[3:5]
                 self.opti.subject_to((1 - in_contact) * vel_rollpitch == [0] * 2)
+
+
 
                 # Contact: Zero z-velocity / Swing: Spline z-velocity
                 vel_z = vel[2]
@@ -242,6 +262,7 @@ class OCP:
             pos_max = self.robot.joint_pos_max
             vel_min = -self.robot.joint_vel_max
             vel_max = self.robot.joint_vel_max
+
             q_j = q[7:]  # skip base quaternion
             v_j = v[6:]  # skip base angular velocity
             self.opti.subject_to(self.opti.bounded(pos_min, q_j, pos_max))

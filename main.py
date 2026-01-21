@@ -3,18 +3,20 @@ import numpy as np
 import pinocchio as pin
 import casadi as ca
 import matplotlib.pyplot as plt
+import meshcat.transformations as tf
 
 from args import *
 from utils.robot import *
 from utils.visualization import visualize_forces
-from optimization import make_ocp
+from optimization import make_ocp, ocp
 
 # Robot params
-robot = TOCABI(reference_pose="standing")
+# robot = TOCABI(reference_pose="standing")
+robot = P73(reference_pose="standing")
 dynamics ="whole_body_rnea"  # see args.py for options
 
 # Tracking targets
-base_vel_des = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])  # linear + angular velocity
+base_vel_des = np.array([0.1, 0.1, 0.0, 0.0, 0.0, 0.1])  # linear + angular velocity
 arm_vel_des = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0,          # Left arm EE velocity (relative to the base)
                         0.0, 0.0, 0.0, 0.0, 0.0, 0.0])         # Right arm EE velocity (relative to the base)
 arm_force_des = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0,        # Left arm EE wrench (global) 
@@ -53,6 +55,8 @@ def mpc_loop(ocp):
     t_current = 0
     ocp.update_params(x_init, t_current)
 
+
+
     # Initialize solver
     ocp.init_solver(solver, SOLVER_ARGS[solver])
     if compile_solver:
@@ -68,6 +72,7 @@ def mpc_loop(ocp):
         for k in range(mpc_loops):
             # Update params
             t_current = k * dt_min
+            
             ocp.update_params(x_init, t_current)
             solver_params = ocp.get_solver_params()
 
@@ -110,6 +115,8 @@ def mpc_loop(ocp):
     # Compute total horizon time
     T = sum([ocp.opti.value(dt) for dt in ocp.dts])
 
+
+
     print("************** STATS **************")
     print("Avg solve time (ms): ", np.average(solve_times) * 1000)
     print("Std solve time (ms): ", np.std(solve_times) * 1000)
@@ -117,6 +124,7 @@ def mpc_loop(ocp):
     print("Horizon length (s): ", T)
 
     return ocp
+
 
 
 def main():
@@ -147,13 +155,50 @@ def main():
     ocp = mpc_loop(ocp)
 
     # Visualize robot
+    # robot_instance.initViewer()
+    # robot_instance.loadViewerModel("pinocchio")
+    # robot_instance.display(q0)
+    # viewer = robot_instance.viewer
+    # for _ in range(50):
+    #     for (q, forces) in zip(ocp.q_sol, ocp.forces_sol):
+    #         robot_instance.display(q)
+    #         visualize_forces(viewer, robot, model, data, q, forces)
+    #         time.sleep(dt_min)
+    
+    # robot_instance.initViewer()
+    # robot_instance.loadViewerModel("pinocchio")
+    # robot_instance.display(q0)
+    # viewer = robot_instance.viewer
+    # viewer["pinocchio"].set_transform(tf.scale_matrix(0.001))
+    # for _ in range(50):
+    #     for (q, forces) in zip(ocp.q_sol, ocp.forces_sol):
+    #         robot_instance.display(q)
+    #         visualize_forces(viewer, robot, model, data, q, forces)
+    #         time.sleep(dt_min)
+
     robot_instance.initViewer()
     robot_instance.loadViewerModel("pinocchio")
-    robot_instance.display(q0)
+    
     viewer = robot_instance.viewer
+    visual_model = robot_instance.visual_model
+    visual_data = robot_instance.visual_data 
+
     for _ in range(50):
         for (q, forces) in zip(ocp.q_sol, ocp.forces_sol):
-            robot_instance.display(q)
+            pin.updateGeometryPlacements(model, data, visual_model, visual_data, q)
+            
+            for geom in visual_model.geometryObjects:
+                visual_name = f"pinocchio/visuals/{geom.name}"
+                geom_id = visual_model.getGeometryId(geom.name)
+                
+                T = visual_data.oMg[geom_id]
+                
+                scale = np.array(geom.meshScale).flatten()
+                Tscale = np.eye(4)
+                Tscale[:3, :3] = np.diag(scale)
+                
+                viewer[visual_name].set_transform(T @ Tscale)
+
             visualize_forces(viewer, robot, model, data, q, forces)
             time.sleep(dt_min)
 
