@@ -147,7 +147,7 @@ class P73(Robot):
             [10000] * 2,  # base rot x/y
             [0],          # base rot z
         ))
-        Q_leg_pos_diag   = np.array([1000.0, 1000.0, 1000.0, 100.0, 1000.0, 1000.0])
+        Q_leg_pos_diag   = np.array([1000.0, 1000.0, 1000.0, 10000.0, 1000.0, 1000.0])
         Q_waist_yaw_pos_diag   = np.array([1000.0])
         Q_arm_reduced_pos_diag = np.array([1000] * 7)
 
