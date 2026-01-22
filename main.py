@@ -56,8 +56,6 @@ def mpc_loop(ocp):
     t_current = 0
     ocp.update_params(x_init, t_current)
 
-
-
     # Initialize solver
     ocp.init_solver(solver, SOLVER_ARGS[solver])
     if compile_solver:
@@ -73,7 +71,6 @@ def mpc_loop(ocp):
         for k in range(mpc_loops):
             # Update params
             t_current = k * dt_min
-            
             ocp.update_params(x_init, t_current)
             solver_params = ocp.get_solver_params()
 

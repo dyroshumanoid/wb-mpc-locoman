@@ -70,7 +70,6 @@ class OCP:
         self.base_vel_des = self.opti.parameter(6)  # linear + angular velocity
         # self.arm_vel_des = self.opti.parameter(6 * len(self.robot.arm_ee_frames))   # linear velocity at both end-effectors
         # self.arm_force_des = self.opti.parameter(6 * len(self.robot.arm_ee_frames)) # force at both end-effectors
-
         # Adaptive time steps
         ratio = self.dt_max / self.dt_min
         gamma = ratio ** (1 / (self.nodes - 1))  # growth factor
@@ -152,7 +151,6 @@ class OCP:
         W = self.robot.foot_width / 2
         L = self.robot.foot_length / 2
         g = 9.81
-
         for i in range(self.nodes):
             # Gather state and input info
             q = self.get_q(i)
@@ -165,10 +163,10 @@ class OCP:
             v_base_xy = v[:2]
             v_base_des_xy = self.base_vel_des[:2]
             T_swing = self.swing_period
-            base_rot = self.dyn.get_base_rotation()(q)
             base_pos = self.dyn.get_base_position()(q)
 
             z0 = base_pos[2]
+
             # Contact and swing constraints
             for idx, frame_id in enumerate(self.foot_frames):
                 f_e = forces[idx * 6 : (idx + 1) * 6]
@@ -199,15 +197,23 @@ class OCP:
 
                 vel = self.dyn.get_frame_velocity(frame_id)(q, v)
                 vel_xy = vel[:2]
+                pos_foot = self.dyn.get_frame_position(frame_id)(q)[:2]
 
                 p_nominal_hip = self.dyn.get_frame_position(self.robot.hip_frames[idx])(q)[:2]
                 p_step_target = p_nominal_hip + (T_swing / 2.0) * v_base_des_xy + \
                                 ca.sqrt(z0/g) * (v_base_xy - v_base_des_xy)
                 
-                pos_foot = self.dyn.get_frame_position(frame_id)(q)[:2]
-                k_p = 3.0
-                v_swing_xy_des = v_base_xy + k_p * (p_step_target - pos_foot)
-                self.opti.subject_to(vel_xy - (1 - in_contact) * v_swing_xy_des == [0] * 2)
+                v_relative_swing = get_spline_vel_xy(
+                    swing_phase=swing_phase, 
+                    swing_period=self.swing_period,
+                    p0=pos_foot - (p_step_target - p_nominal_hip),
+                    p1=p_step_target
+                )
+
+                v_swing_xy_des = v_base_xy + v_relative_swing
+                
+                vel_xy_diff = vel_xy - v_swing_xy_des
+                self.opti.subject_to(in_contact * vel_xy + (1 - in_contact) * vel_xy_diff == [0] * 2)
 
                 vel_ang = vel[3:]
                 self.opti.subject_to(vel_ang[:2] == [0] * 2)

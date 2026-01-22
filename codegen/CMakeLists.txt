@@ -5,22 +5,21 @@ project(CompiledSolver)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 17)
 
-# Find required packages
 find_library(FATROP_LIB
-	NAMES fatrop
-	PATHS /home/kwan/anaconda3/envs/wb-mpc/lib
-	NO_DEFAULT_PATH
-	REQUIRED
-)
-find_library(BLASFEO_LIB
-	NAMES blasfeo
-	PATHS /home/kwan/anaconda3/envs/wb-mpc/lib
-	NO_DEFAULT_PATH
-	REQUIRED
+    NAMES fatrop libfatrop.so
+    PATHS $ENV{CONDA_PREFIX}/lib
+    NO_DEFAULT_PATH
+    REQUIRED
 )
 
-# Add include directories from the conda environment
-include_directories(/home/kwan/anaconda3/envs/wb-mpc/include)
+find_library(BLASFEO_LIB
+    NAMES blasfeo libblasfeo.so
+    PATHS $ENV{CONDA_PREFIX}/lib
+    NO_DEFAULT_PATH
+    REQUIRED
+)
+
+include_directories($ENV{CONDA_PREFIX}/include)
 
 if(NOT FATROP_LIB)
 	message(FATAL_ERROR "Could not find FATROP library. If installed in a custom location, set -DFATROP_LIB=/path/to/libfatrop.so")
