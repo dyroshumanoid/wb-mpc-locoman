@@ -11,12 +11,27 @@ from utils.visualization import visualize_forces
 from optimization import make_ocp, ocp
 
 # Robot params
-robot = TOCABI(reference_pose="standing")
+# robot = TOCABI(reference_pose="standing")
 # robot = P73(reference_pose="standing")
+# robot = P73_old(reference_pose="standing")
+robot = P73_4bar(reference_pose="standing")
+
+model = robot.model
+
+print("===== Pinocchio Joints =====")
+print(f"Number of joints (including universe): {model.njoints}")
+print(f"nq = {model.nq}, nv = {model.nv}")
+
+for jid, joint in enumerate(model.joints):
+    joint_name = model.names[jid]
+    nq = joint.nq
+    nv = joint.nv
+    print(f"[{jid:2d}] joint name = {joint_name:25s} | nq={nq}, nv={nv}")
+
 dynamics ="whole_body_rnea"  # see args.py for options
 
 # Tracking targets
-base_vel_des = np.array([0.1, 0.1, 0.0, 0.0, 0.0, 0.1])  # linear + angular velocity
+base_vel_des = np.array([0.2, 0.0, 0.0, 0.0, 0.0, 0.])  # linear + angular velocity
 arm_vel_des = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0,          # Left arm EE velocity (relative to the base)
                         0.0, 0.0, 0.0, 0.0, 0.0, 0.0])         # Right arm EE velocity (relative to the base)
 arm_force_des = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0,        # Left arm EE wrench (global) 
@@ -56,6 +71,8 @@ def mpc_loop(ocp):
     t_current = 0
     ocp.update_params(x_init, t_current)
 
+
+
     # Initialize solver
     ocp.init_solver(solver, SOLVER_ARGS[solver])
     if compile_solver:
@@ -71,6 +88,7 @@ def mpc_loop(ocp):
         for k in range(mpc_loops):
             # Update params
             t_current = k * dt_min
+            
             ocp.update_params(x_init, t_current)
             solver_params = ocp.get_solver_params()
 
@@ -145,12 +163,19 @@ def main():
         tau_nodes=tau_nodes,
         warm_start=warm_start,
     )
+
+    print("model.nq, model.nv:", robot.model.nq, robot.model.nv)
+    print("robot.nj:", robot.nj)
+    print("len(robot.Q_diag):", None if robot.Q_diag is None else len(robot.Q_diag))
+    print("ocp.ndx_opt:", ocp.ndx_opt)
+
     ocp.set_time_params(dt_min, dt_max)
     ocp.set_swing_params(swing_height, swing_vel_limits)
     ocp.set_tracking_targets(base_vel_des, arm_vel_des, arm_force_des)
 
     # Run MPC
     ocp = mpc_loop(ocp)
+
 
     # Visualize robot
     # robot_instance.initViewer()
