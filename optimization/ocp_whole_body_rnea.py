@@ -178,8 +178,6 @@ class OCPWholeBodyRNEA(OCP):
                     # Set forces to zero if not in contact
                     if contact_schedule[j, i] == 0:
                         f_des[6 * j : 6 * j + 6] = [0] * 6
-                if len(self.robot.arm_ee_frames) > 0:
-                    f_des[6*self.n_feet:] = self.opti.value(self.arm_force_des)
 
                 u_prev = self.U_prev[i]
                 a_prev = u_prev[:self.na_opt]

@@ -47,7 +47,7 @@ For certain models, the argument `include_base` determines whether the base vari
 
 The optimization parameters fall into the following categories:
 - Initial state: `x_init`
-- Tracking targets: `base_vel_des`, `arm_vel_des`, `arm_force_des`
+- Tracking targets: `base_vel_des`
 - Gait schedule: `contact_schedule` (0 or 1), `swing_schedule` (phase between 0 and 1)
 - Tunable parameters:
     - `Q_diag`, `R_diag`: Diagonals of the weight matrices

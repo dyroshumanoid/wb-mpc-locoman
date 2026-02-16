@@ -12,25 +12,23 @@ from optimization import make_ocp, ocp
 
 # Robot params
 robot = TOCABI(reference_pose="standing")
-# robot = P73(reference_pose="standing")
 dynamics ="whole_body_rnea"  # see args.py for options
 
+print(robot.joint_pos_min)
+print(robot.joint_pos_max)
+
 # Tracking targets
-base_vel_des = np.array([0.1, 0.1, 0.0, 0.0, 0.0, 0.1])  # linear + angular velocity
-arm_vel_des = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0,          # Left arm EE velocity (relative to the base)
-                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0])         # Right arm EE velocity (relative to the base)
-arm_force_des = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0,        # Left arm EE wrench (global) 
-                          0.0, 0.0, 0.0, 0.0, 0.0, 0.0])       # Right arm EE wrench (global)
+base_vel_des = np.array([0.1, 0.0, 0.0, 0.0, 0.0, 0.0])  # linear + angular velocity
 
 # OCP params
 nodes = 10      # OCP nodes
-tau_nodes = 2   # add torque limits for this many nodes
-dt_min = 0.01  # initial time step
-dt_max = 0.20   # final time step
+tau_nodes = 3   # add torque limits for this many nodes
+dt_min = 0.015  # initial time step
+dt_max = 0.08   # final time step
 
 # Gait params
 gait_type = "walk"              # "walk" or "stand"
-gait_period = 1.2               # seconds
+gait_period = 1.6               # seconds
 swing_height = 0.08             # meters
 swing_vel_limits = [0.3, -0.3]  # meters/second
 
@@ -42,6 +40,11 @@ load_compiled_solver = None  # None or <filename> in "codegen/lib/"
 
 # MPC
 mpc_loops = 500
+
+# Foot parameters for wrench cone
+foot_length = robot.foot_length
+foot_width = robot.foot_width
+mu = 0.9
 
 # Debug
 display = True  # plot joint positions, velocities, torques
@@ -55,8 +58,6 @@ def mpc_loop(ocp):
     x_init = ocp.x_nom
     t_current = 0
     ocp.update_params(x_init, t_current)
-
-
 
     # Initialize solver
     ocp.init_solver(solver, SOLVER_ARGS[solver])
@@ -116,8 +117,6 @@ def mpc_loop(ocp):
     # Compute total horizon time
     T = sum([ocp.opti.value(dt) for dt in ocp.dts])
 
-
-
     print("************** STATS **************")
     print("Avg solve time (ms): ", np.average(solve_times) * 1000)
     print("Std solve time (ms): ", np.std(solve_times) * 1000)
@@ -125,8 +124,6 @@ def mpc_loop(ocp):
     print("Horizon length (s): ", T)
 
     return ocp
-
-
 
 def main():
     # Initialize robot
@@ -150,32 +147,11 @@ def main():
     )
     ocp.set_time_params(dt_min, dt_max)
     ocp.set_swing_params(swing_height, swing_vel_limits)
-    ocp.set_tracking_targets(base_vel_des, arm_vel_des, arm_force_des)
+    ocp.set_foot_params(foot_length, foot_width, mu)
+    ocp.set_tracking_targets(base_vel_des)
 
     # Run MPC
     ocp = mpc_loop(ocp)
-
-    # Visualize robot
-    # robot_instance.initViewer()
-    # robot_instance.loadViewerModel("pinocchio")
-    # robot_instance.display(q0)
-    # viewer = robot_instance.viewer
-    # for _ in range(50):
-    #     for (q, forces) in zip(ocp.q_sol, ocp.forces_sol):
-    #         robot_instance.display(q)
-    #         visualize_forces(viewer, robot, model, data, q, forces)
-    #         time.sleep(dt_min)
-    
-    # robot_instance.initViewer()
-    # robot_instance.loadViewerModel("pinocchio")
-    # robot_instance.display(q0)
-    # viewer = robot_instance.viewer
-    # viewer["pinocchio"].set_transform(tf.scale_matrix(0.001))
-    # for _ in range(50):
-    #     for (q, forces) in zip(ocp.q_sol, ocp.forces_sol):
-    #         robot_instance.display(q)
-    #         visualize_forces(viewer, robot, model, data, q, forces)
-    #         time.sleep(dt_min)
 
     if display:
         robot_instance.initViewer()

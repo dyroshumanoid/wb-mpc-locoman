@@ -63,13 +63,15 @@ class OCP:
         self.swing_period = self.opti.parameter(1)  # swing period (in seconds)
         self.swing_height = self.opti.parameter(1)  # max swing height
         self.swing_vel_limits = self.opti.parameter(2)  # start and end swing velocities
+        
+        self.foot_length = self.opti.parameter(1)   # Robot foot length
+        self.foot_width = self.opti.parameter(1)    # Robot foot width
+        self.mu = self.opti.parameter(1)            # Friction coefficient
 
         self.Q_diag = self.opti.parameter(self.ndx_opt)  # state weights
         self.R_diag = self.opti.parameter(self.nu_opt[0])  # input weights
 
         self.base_vel_des = self.opti.parameter(6)  # linear + angular velocity
-        # self.arm_vel_des = self.opti.parameter(6 * len(self.robot.arm_ee_frames))   # linear velocity at both end-effectors
-        # self.arm_force_des = self.opti.parameter(6 * len(self.robot.arm_ee_frames)) # force at both end-effectors
 
         # Adaptive time steps
         ratio = self.dt_max / self.dt_min
@@ -112,41 +114,6 @@ class OCP:
         """
         # Initial state
         self.opti.subject_to(self.DX_opt[0] == [0] * self.ndx_opt)
-        # arm_vel_des_global_list = []
-
-        # if self.arm_ee_frames:
-        #     # Compute global velocity target for arm end-effector
-        #     q_0 = self.x_init[:self.nq]
-        #     base_pos_0 = self.dyn.get_base_position()(q_0)
-        #     base_rot_0 = self.dyn.get_base_rotation()(q_0)
-            
-        #     base_lin_vel = self.base_vel_des[:3]
-        #     base_ang_vel = self.base_vel_des[3:]
-
-        #     for idx, frame_id in enumerate(self.arm_ee_frames):
-
-        #         # desired EE twist in base frame
-        #         arm_v_des = self.arm_vel_des[6*idx     : 6*idx + 3]
-        #         arm_w_des = self.arm_vel_des[6*idx + 3 : 6*idx + 6]
-
-        #         # rotate to world frame
-        #         arm_v_des_global = base_rot_0 @ arm_v_des
-        #         arm_v_des_global[2] = arm_v_des[2]
-        #         arm_v_des_global += base_lin_vel
-
-        #         arm_w_des_global = base_rot_0 @ arm_w_des
-        #         arm_w_des_global += base_ang_vel
-
-        #         # EE position in world
-        #         arm_pos_0 = self.dyn.get_frame_position(frame_id)(q_0)
-        #         arm_pos_rel = arm_pos_0 - base_pos_0
-
-        #         ang_vel_correction = ca.cross(base_ang_vel, arm_pos_rel)
-        #         arm_v_des_global += ang_vel_correction
-
-        #         arm_vel_des_global = ca.vertcat(arm_v_des_global, arm_w_des_global)
-
-        #         arm_vel_des_global_list.append(arm_vel_des_global)
          
         # Foot dimensions for wrench cone
         W = self.robot.foot_width / 2
@@ -162,13 +129,13 @@ class OCP:
             # Dynamics constraints
             self.setup_dynamics_constraints(i)
 
-            v_base_xy = v[:2]
-            v_base_des_xy = self.base_vel_des[:2]
+            # Raibert heuristic for swing foot velocity
+            vel_base_xy = v[:2]
+            vel_base_des_xy = self.base_vel_des[:2]
             T_swing = self.swing_period
-            base_rot = self.dyn.get_base_rotation()(q)
             base_pos = self.dyn.get_base_position()(q)
-
             z0 = base_pos[2]
+            
             # Contact and swing constraints
             for idx, frame_id in enumerate(self.foot_frames):
                 f_e = forces[idx * 6 : (idx + 1) * 6]
@@ -177,75 +144,63 @@ class OCP:
                 in_contact = self.contact_schedule[idx, i]
                 swing_phase = self.swing_schedule[idx, i]
 
-                # Contact: Wrench cone
-                fz = f_e[2]
+                # ==================================== 
+                # (1) Contact Wrench Cone Constraints  
+                #   (1-1) Unilateral constraint: fz >= 0
+                #   (1-2) Pyramid Coulomb friction cone: |fx| <= mu * fz, |fy| <= mu * fz
+                #   (1-3) Center of Pressure (CoP): |tx| <= foot_width/2 * fz, |ty| <= foot_length/2 * fz
+                #   (1-4) Yaw moment bounds (torsional friction constraint) : tau_min <= tz <= tau_max
+                # ==================================== 
                 fx = f_e[0]
                 fy = f_e[1]
+                fz = f_e[2]
                 tx = f_e[3]
                 ty = f_e[4]
                 tz = f_e[5]
                 self.opti.subject_to(in_contact * fz >= 0)
-                self.opti.subject_to(in_contact * ca.fabs(fx) <= in_contact * mu * fz)
-                self.opti.subject_to(in_contact * ca.fabs(fy) <= in_contact * mu * fz)
-                self.opti.subject_to(in_contact * ca.fabs(tx) <= in_contact * W * fz)
-                self.opti.subject_to(in_contact * ca.fabs(ty) <= in_contact * L * fz)
-                tau_min = -mu * (W + L) * fz + ca.fabs(W * fx - mu * tx) + ca.fabs(L * fy - mu * ty)
-                tau_max = mu * (W + L) * fz - ca.fabs(W * fx + mu * tx) - ca.fabs(L * fy + mu * ty)
+                self.opti.subject_to(in_contact * ca.fabs(fx) <= in_contact * self.mu * fz)
+                self.opti.subject_to(in_contact * ca.fabs(fy) <= in_contact * self.mu * fz)
+                self.opti.subject_to(in_contact * ca.fabs(tx) <= in_contact * self.foot_width / 2 * fz)
+                self.opti.subject_to(in_contact * ca.fabs(ty) <= in_contact * self.foot_length / 2 * fz)
+                tau_min = -self.mu * (self.foot_width + self.foot_length) * fz + ca.fabs(self.foot_width / 2 * fx - self.mu * tx) + ca.fabs(self.foot_length / 2 * fy - self.mu * ty)
+                tau_max = self.mu * (self.foot_width + self.foot_length) * fz - ca.fabs(self.foot_width / 2 * fx + self.mu * tx) - ca.fabs(self.foot_length / 2 * fy + self.mu * ty)
                 self.opti.subject_to(in_contact * tau_min <= in_contact * tz)
                 self.opti.subject_to(in_contact * tz <= in_contact * tau_max)
 
-                # Swing: Zero wrenches
+                # =========================================
+                # (2) Swing Phase Constraints (Zero Wrench)
+                # =========================================
                 self.opti.subject_to((1 - in_contact) * f_e == [0] * 6)
 
+                # =========================
+                # (3) Foot Velocity Constraints 
+                #   (3-1) Contact: Zero velocity
+                #   (3-2) Swing: Follow spline trajectory in xy and z directions
+                #       (3-2-1) xy: Cubic spline from current position to nominal foothold position (Raibert heuristic)
+                #       (3-2-2) z: Cubic spline from current position to swing height
+                #       (3-2-3) foor yaw velocity is not constrained, but roll and pitch velocities are zero 
+                # =========================
+
+                # xy velocity
                 vel = self.dyn.get_frame_velocity(frame_id)(q, v)
                 vel_xy = vel[:2]
 
-                p_nominal_hip = self.dyn.get_frame_position(self.robot.hip_frames[idx])(q)[:2]
-                p_step_target = p_nominal_hip + (T_swing / 2.0) * v_base_des_xy + \
-                                ca.sqrt(z0/g) * (v_base_xy - v_base_des_xy)
+                pos_hip_xy = self.dyn.get_frame_position(self.robot.hip_frames[idx])(q)[:2]
+                pos_xy_target = pos_hip_xy + 0.5 * T_swing * vel_base_xy + ca.sqrt(z0/g) * (vel_base_xy - vel_base_des_xy)
                 
-                pos_foot = self.dyn.get_frame_position(frame_id)(q)[:2]
-                k_p = 3.0
-                v_swing_xy_des = v_base_xy + k_p * (p_step_target - pos_foot)
-                self.opti.subject_to(vel_xy - (1 - in_contact) * v_swing_xy_des == [0] * 2)
-
-                vel_ang = vel[3:]
-                self.opti.subject_to(vel_ang[:2] == [0] * 2)
-                self.opti.subject_to(in_contact * vel_ang[2] == 0)
-
-
-
-
-
-
-
-                # Contact: Zero xy-velocities
-                # vel = self.dyn.get_frame_velocity(frame_id)(q, v)
-                # vel_xy = vel[:2]
-                # self.opti.subject_to(in_contact * vel_xy == [0] * 2)
-
-                # p_nominal_hip = self.dyn.get_frame_position(self.robot.hip_frames[idx])(q)[:2]
-                # p_step_target = p_nominal_hip + (T_swing / 2.0) * v_base_des_xy + \
-                #                 ca.sqrt(z0/g) * (v_base_xy - v_base_des_xy)
-                # # p_step_target[0] = ca.fmax(p_step_target[0], base_pos[0] + 0.05)
-                # pos_foot = self.dyn.get_frame_position(frame_id)(q)[:2]
-                # k_p=3.0
-                # v_swing_xy_des = v_base_xy + k_p * (p_step_target - pos_foot)
-                # self.opti.subject_to((1 - in_contact) * (vel_xy - v_swing_xy_des) == [0] * 2)
+                pos = self.dyn.get_frame_position(frame_id)(q)
+                pos_xy = pos[:2]
+                v_swing_xy_des = get_spline_vel_xy(
+                    swing_phase=swing_phase, 
+                    swing_period=self.swing_period,
+                    p0=pos_xy,
+                    p1=pos_xy_target
+                )
                 
+                vel_xy_diff = vel_xy - v_swing_xy_des
+                self.opti.subject_to(in_contact * vel_xy + (1 - in_contact) * vel_xy_diff == [0] * 2)
 
-
-                # Contact: Zero angular velocities
-                # vel_ang = vel[3:]
-                # self.opti.subject_to(in_contact * vel_ang == [0] * 3)
-               
-                # # Swing: Zero roll-pitch velocity
-                # vel_rollpitch = vel[3:5]
-                # self.opti.subject_to((1 - in_contact) * vel_rollpitch == [0] * 2)
-
-
-
-                # Contact: Zero z-velocity / Swing: Spline z-velocity
+                # z velocity
                 vel_z = vel[2]
                 vel_z_des = get_spline_vel_z(
                     swing_phase,
@@ -256,6 +211,11 @@ class OCP:
                 )
                 vel_diff = vel_z - vel_z_des
                 self.opti.subject_to(in_contact * vel_z + (1 - in_contact) * vel_diff == 0)
+                
+                # angular velocity                
+                vel_ang = vel[3:]
+                self.opti.subject_to(vel_ang[:2] == [0] * 2)
+                self.opti.subject_to(in_contact * vel_ang[2] == 0)
 
             # Warm start: Use n_contacts from gait sequence for u_des
             self.opti.set_value(self.n_contacts, self.gait_sequence.n_contacts)
@@ -263,21 +223,6 @@ class OCP:
             u_warm = self.opti.value(self.u_des)[:self.nu_opt[i]]
             
             self.opti.set_initial(self.U_opt[i], u_warm)
-
-            # Arm end-effector force
-            # if self.arm_ee_frames:
-            #     for idx in range(len(self.arm_ee_frames)):
-            #         f = forces[6 * self.n_feet + 6*idx : 6 * self.n_feet + 6*(idx+1)]
-            #         f_des = self.arm_force_des[6*idx : 6*(idx+1)]
-            #         self.opti.subject_to(f[:3] == f_des[:3])
-
-            # # Arm end-effector velocity
-            # if self.arm_ee_frames:
-            #     for idx, frame_id in enumerate(self.arm_ee_frames):
-            #         vel = self.dyn.get_frame_velocity(frame_id)(q, v)
-            #         vel_lin = vel[:6]
-            #         vel_diff = vel_lin - arm_vel_des_global_list[idx]
-            #         self.opti.subject_to(vel_diff[:3] == [0] * 3)
                     
             # Joint limits
             pos_min = self.robot.joint_pos_min
@@ -322,16 +267,18 @@ class OCP:
     def set_time_params(self, dt_min, dt_max):
         self.opti.set_value(self.dt_min, dt_min)
         self.opti.set_value(self.dt_max, dt_max)
-
+        
     def set_swing_params(self, swing_height, swing_vel_limits):
         self.opti.set_value(self.swing_height, swing_height)
         self.opti.set_value(self.swing_vel_limits, swing_vel_limits)
 
-    def set_tracking_targets(self, base_vel_des, arm_vel_des=None, arm_force_des=None):
+    def set_foot_params(self, foot_length, foot_width, mu):
+        self.opti.set_value(self.foot_length, foot_length)
+        self.opti.set_value(self.foot_width, foot_width)
+        self.opti.set_value(self.mu, mu)
+
+    def set_tracking_targets(self, base_vel_des):
         self.opti.set_value(self.base_vel_des, base_vel_des)
-        # if self.arm_ee_frames:
-        #     self.opti.set_value(self.arm_vel_des, arm_vel_des)
-        #     self.opti.set_value(self.arm_force_des, arm_force_des)
             
     def update_initial_state(self, x_init):
         self.opti.set_value(self.x_init, x_init)
@@ -388,10 +335,8 @@ class OCP:
             # Store solver params
             self.solver_params = [self.x_init, self.dt_min, self.dt_max, self.contact_schedule, self.swing_schedule,
                                   self.n_contacts, self.swing_period, self.swing_height, self.swing_vel_limits,
+                                  self.foot_length, self.foot_width, self.mu,
                                   self.Q_diag, self.R_diag, self.base_vel_des]
-            # if self.arm_ee_frames:
-                # self.solver_params += [self.arm_vel_des]
-                # self.solver_params += [self.arm_force_des]
             if self.warm_start:
                 self.solver_params += [self.opti.x]
 

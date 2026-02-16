@@ -59,6 +59,13 @@ def get_bezier_vel_z(swing_phase, swing_period, h_max=0.1):
 def cubic_bezier_derivative(p0, p1, phase):
     return 6 * phase * (1 - phase) * (p1 - p0)
 
+def get_spline_vel_xy(swing_phase, swing_period, p0, p1):
+    eps = 1e-6 
+    safe_period = swing_period + eps 
+    
+    spline_xy = CubicSpline(t0=0, t1=safe_period, pos0=p0, vel0=0, pos1=p1, vel1=0)
+    return spline_xy.velocity(swing_phase * safe_period)
+
 def get_spline_vel_z(swing_phase, swing_period, h_max=0.1, v_liftoff=0.1, v_touchdown=-0.2):
     mid_time = swing_period / 2
     spline1 = CubicSpline(0, mid_time, 0, v_liftoff, h_max, 0)

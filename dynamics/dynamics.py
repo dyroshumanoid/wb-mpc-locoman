@@ -91,6 +91,15 @@ class Dynamics:
         pos = self.data.oMf[frame_id].translation
 
         return ca.Function("frame_pos", [q], [pos], ["q"], ["pos"])
+    
+    def get_frame_rotation(self, frame_id):
+        q = ca.SX.sym("q", self.nq)
+
+        cpin.forwardKinematics(self.model, self.data, q)
+        cpin.framesForwardKinematics(self.model, self.data, q)
+        rot = self.data.oMf[frame_id].rotation
+
+        return ca.Function(f"frame_rot", [q], [rot], ["q"], ["rot"])
 
     def get_frame_velocity(self, frame_id):
         q = ca.SX.sym("q", self.nq)
