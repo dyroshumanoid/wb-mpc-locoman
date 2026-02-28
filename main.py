@@ -12,6 +12,7 @@ from optimization import make_ocp, ocp
 
 # Robot params
 robot = TOCABI(reference_pose="standing")
+# robot = P73(reference_pose="standing")
 dynamics ="whole_body_rnea"  # see args.py for options
 
 print(robot.joint_pos_min)
@@ -21,14 +22,14 @@ print(robot.joint_pos_max)
 base_vel_des = np.array([0.1, 0.0, 0.0, 0.0, 0.0, 0.0])  # linear + angular velocity
 
 # OCP params
-nodes = 10      # OCP nodes
-tau_nodes = 3   # add torque limits for this many nodes
+nodes = 5      # OCP nodes
+tau_nodes = 2   # add torque limits for this many nodes
 dt_min = 0.015  # initial time step
 dt_max = 0.08   # final time step
 
 # Gait params
 gait_type = "walk"              # "walk" or "stand"
-gait_period = 1.6               # seconds
+gait_period = 1.2               # seconds
 swing_height = 0.08             # meters
 swing_vel_limits = [0.3, -0.3]  # meters/second
 
@@ -39,7 +40,7 @@ compile_solver = True
 load_compiled_solver = None  # None or <filename> in "codegen/lib/"
 
 # MPC
-mpc_loops = 500
+mpc_loops = 200
 
 # Foot parameters for wrench cone
 foot_length = robot.foot_length

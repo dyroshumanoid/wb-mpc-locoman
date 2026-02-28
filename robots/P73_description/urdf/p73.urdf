@@ -1338,14 +1338,14 @@
     <axis xyz="0.0 1.0 0.0"/>
   </joint>
   <joint name="L_Knee_Joint" type="revolute">
-<limit lower="-3.14159" upper="0.0" effort="300" velocity="100" />
+<limit lower="-3.14159" upper="0.5" effort="300" velocity="100" />
     <origin rpy="0 0 0" xyz="-0.042753 -0.019487 -0.205463"/>
     <parent link="L_Thigh_Link"/>
     <child link="L_Knee_Link"/>
     <axis xyz="0.0 -1.0 -6.5e-05"/>
   </joint>
 <joint name="R_Knee_Joint" type="revolute">
-   <limit lower="-3.14159" upper="0.0" effort="300" velocity="100" />
+   <limit lower="-3.14159" upper="0.5" effort="300" velocity="100" />
     <origin rpy="0 0 0" xyz="-0.042753 0.019526 -0.20546"/>
     <parent link="R_Thigh_Link"/>
     <child link="R_Knee_Link"/>

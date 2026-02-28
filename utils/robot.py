@@ -117,3 +117,57 @@ class TOCABI(Robot):
             [5e-4] * self.nf,         # forces
             [1e-4] * self.nj,         # leg joint torques
         ))
+        
+class P73(Robot):
+    def __init__(self, reference_pose="standing"):
+        urdf_path = "robots/P73_description/urdf/p73.urdf"
+        srdf_path = "robots/P73_description/srdf/p73.srdf"
+
+        lock_joints = set([
+            "WaistPitch_Joint", "WaistRoll_Joint", "WaistYaw_Joint",
+            "NeckRoll_Joint", "NeckYaw_Joint", "NeckPitch_Joint",
+            "L_ShoulderPitch_Joint", "L_ShoulderRoll_Joint", "L_ShoulderYaw_Joint", 
+            "L_Elbow_Joint", "L_WristYaw_Joint", "L_WristPitch_Joint", "L_WristRoll_Joint",
+            "R_ShoulderPitch_Joint", "R_ShoulderRoll_Joint", "R_ShoulderYaw_Joint", 
+            "R_Elbow_Joint", "R_WristYaw_Joint", "R_WristPitch_Joint", "R_WristRoll_Joint"
+        ])
+        super().__init__(urdf_path, srdf_path, reference_pose, lock_joints=lock_joints)
+        
+        # Foot dimensions for wrench cone
+        self.foot_length = 0.275
+        self.foot_width = 0.1
+        
+        self.hip_frames = [
+            self.model.getFrameId("L_HipPitch_Joint"),
+            self.model.getFrameId("R_HipPitch_Joint"),
+        ]
+        
+        # State weights
+        Q_base_pos_diag = np.concatenate((
+            [0] * 2,      # base x/y
+            [1000],       # base z
+            [10000] * 2,  # base rot x/y
+            [0],          # base rot z
+        ))
+        Q_leg_pos_diag         = np.array([1000.0] * 6)
+        Q_pos_diag = np.concatenate((Q_base_pos_diag, 
+                                     Q_leg_pos_diag, Q_leg_pos_diag,))  
+        
+        Q_base_vel_diag = np.concatenate((
+            [5000] * 2,      # base lin x/y
+            [1000],          # base lin z
+            [1000] * 2,      # base ang x/y
+            [5000],          # base ang z
+        ))
+        
+        Q_leg_vel_diag   = np.array([10.0, 10.0, 10.0, 10.0, 10.0, 10.0])        
+        Q_vel_diag = np.concatenate((Q_base_vel_diag, 
+                                     Q_leg_vel_diag, Q_leg_vel_diag,))
+
+
+        self.Q_diag = np.concatenate((Q_pos_diag, Q_vel_diag))
+        self.R_diag = np.concatenate((
+            [1e-3] * self.nv,     # accelerations
+            [5e-4] * self.nf,         # forces
+            [1e-4] * self.nj,         # leg joint torques
+        ))

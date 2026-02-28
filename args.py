@@ -21,9 +21,9 @@ SOLVER_ARGS = {
         "opts": {
             "expand": True,
             "structure_detection": "auto",
-            "debug": True,
+            "debug": False,
             "fatrop.print_level": 0,
-            "fatrop.max_iter": 10,
+            "fatrop.max_iter": 3,
             "fatrop.tol": 1e-3,
             "fatrop.mu_init": 1e-4,
             "fatrop.warm_start_init_point": True,
