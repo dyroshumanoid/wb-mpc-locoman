@@ -11,8 +11,8 @@ from utils.visualization import visualize_forces
 from optimization import make_ocp, ocp
 
 # Robot params
-robot = TOCABI(reference_pose="standing")
-# robot = P73(reference_pose="standing")
+# robot = TOCABI(reference_pose="standing")
+robot = P73(reference_pose="standing")
 dynamics ="whole_body_rnea"  # see args.py for options
 
 print(robot.joint_pos_min)

@@ -23,7 +23,7 @@ SOLVER_ARGS = {
             "structure_detection": "auto",
             "debug": False,
             "fatrop.print_level": 0,
-            "fatrop.max_iter": 3,
+            "fatrop.max_iter": 5,
             "fatrop.tol": 1e-3,
             "fatrop.mu_init": 1e-4,
             "fatrop.warm_start_init_point": True,
