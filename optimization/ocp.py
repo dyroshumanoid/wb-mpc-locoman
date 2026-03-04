@@ -212,17 +212,11 @@ class OCP:
                 vel_diff = vel_z - vel_z_des
                 self.opti.subject_to(in_contact * vel_z + (1 - in_contact) * vel_diff == 0)
                 
-                # angular velocity                
-                # vel_ang = vel[3:]
-                # self.opti.subject_to(vel_ang[:2] == [0] * 2)
-                # self.opti.subject_to(in_contact * vel_ang[2] == 0)
-                
                 R_foot = self.dyn.get_frame_rotation(frame_id)(q)  # 3x3 (world <- foot)
                 ez = ca.DM([0, 0, 1])
                 z_foot = R_foot @ ez             # foot z axis expressed in world
                 e_rp = z_foot[0:2]
                 self.opti.subject_to(e_rp == 0)
-
 
             # Warm start: Use n_contacts from gait sequence for u_des
             self.opti.set_value(self.n_contacts, self.gait_sequence.n_contacts)
