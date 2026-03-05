@@ -328,6 +328,13 @@ class OCP:
         ubg = self.opti.ubg
         self.g_data = ca.Function("g_data", [x, p], [g, lbg, ubg])
 
+        # CV inf-norm symbolic expression/function
+        lb_viol = ca.fmax(0, lbg - g)
+        ub_viol = ca.fmax(0, g - ubg)
+        viol = ca.vertcat(lb_viol, ub_viol)
+        cv_inf_expr = ca.mmax(viol)
+        self.cv_inf_fun = ca.Function("cv_inf_fun", [x, p], [cv_inf_expr])
+        
         # Initialize solver
         if self.solver == "fatrop" or self.solver == "ipopt":
             opts = solver_args["opts"]
@@ -345,7 +352,8 @@ class OCP:
             self.solver_function = self.opti.to_function(
                 "solver_function",
                 self.solver_params,  # input (params)
-                [self.opti.x],  # output (solution)   
+                [self.opti.x, 
+                 self.cv_inf_fun(self.opti.x, self.opti.p)]  
             )
 
         elif self.solver == "osqp":

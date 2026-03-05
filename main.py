@@ -15,9 +15,6 @@ robot = TOCABI(reference_pose="standing")
 # robot = P73(reference_pose="standing")
 dynamics ="whole_body_rnea"  # see args.py for options
 
-print(robot.joint_pos_min)
-print(robot.joint_pos_max)
-
 # Tracking targets
 base_vel_des = np.array([0.1, 0.0, 0.0, 0.0, 0.0, 0.0])  # linear + angular velocity
 
@@ -29,7 +26,7 @@ dt_max = 0.08   # final time step
 
 # Gait params
 gait_type = "walk"              # "walk" or "stand"
-gait_period = 1.2               # seconds
+gait_period = 1.0               # seconds
 swing_height = 0.08             # meters
 swing_vel_limits = [0.3, -0.3]  # meters/second
 
@@ -81,7 +78,13 @@ def mpc_loop(ocp):
 
             # Solve
             start_time = time.time()
-            sol_x = solver_function(*solver_params)
+            solver_out = solver_function(*solver_params)
+            if isinstance(solver_out, (list, tuple)):
+                sol_x = solver_out[0]
+                cv_fun = float(solver_out[1])
+            else:
+                sol_x = solver_out
+                cv_fun = None
             end_time = time.time()
             sol_time = end_time - start_time
             solve_times.append(sol_time)
@@ -89,11 +92,13 @@ def mpc_loop(ocp):
             print("Control frequency (Hz): ", 1.0 / sol_time)
 
             # Constraint violation
-            stacked_params = ocp.opti.value(ocp.opti.p)
+            stacked_params = ca.DM(ocp.opti.value(ocp.opti.p))
             g, lbg, ubg = ocp.g_data(sol_x, stacked_params)
             cv = ocp.constr_viol_norm_inf(g, lbg, ubg)
             constr_viol.append(cv)
             print("CV (inf norm): ", cv)
+            if cv_fun is not None:
+                print("CV from solver function (inf norm): ", cv_fun)
 
             # Retract solution and update x_init
             ocp.retract_stacked_sol(sol_x, retract_all=False)
@@ -200,9 +205,8 @@ def main():
                 tau_j_sol.append(tau_j)
 
         fig, axs = plt.subplots(3, 1, figsize=(10, 12))
-        labels = ["L_HipYaw", "L_HipRoll", "L_HipPitch", "L_Knee", "L_AnklePitch", "L_AnkleRoll",
-                  "R_HipYaw", "R_HipRoll", "R_HipPitch", "R_Knee", "R_AnklePitch", "R_AnkleRoll",
-                  "Waist1", "Waist2", "Upperbody"
+        labels = ["L_HipRoll", "L_HipPitch", "L_HipYaw", "L_Knee", "L_AnklePitch", "L_AnkleRoll",
+                  "R_HipRoll", "R_HipPitch", "R_HipYaw", "R_Knee", "R_AnklePitch", "R_AnkleRoll",
                   ]
 
         axs[0].set_title("Joint positions (q)")
